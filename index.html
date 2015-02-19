@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+
+    <title>Lecture 12 &mdash; Data Engineering &mdash; Spring 2015</title>
+
+    <meta name="description" content="Lecture 12 for Ken Anderson's Spring 2015 Seminar on Data Engineering">
+    <meta name="author" content="Ken Anderson">
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+
+    <link rel="stylesheet" href="css/reveal.css">
+    <link rel="stylesheet" href="css/theme/night.css" id="theme">
+
+    <!-- Code syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+
+    <!-- Printing and PDF exports -->
+    <script>
+      var link = document.createElement( 'link' );
+      link.rel = 'stylesheet';
+      link.type = 'text/css';
+      link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+      document.getElementsByTagName( 'head' )[0].appendChild( link );
+    </script>
+
+    <!--[if lt IE 9]>
+    <script src="lib/js/html5shiv.js"></script>
+    <![endif]-->
+  </head>
+
+  <body>
+
+    <div class="reveal">
+
+      <div class="slides">
+
+        <section>
+          <h2>Introduction to NoSQL</h2>
+          <h4>Lecture 12 &mdash; Data Engineering &mdash; Spring 2015</h4>
+          <p>February 19, 2015</p>
+        </section>
+
+        <section>
+          <h2>Credit Where Credit is Due</h2>
+          <ul>
+            <li>For this lecture, I've drawn on material from two books
+              <ul>
+                <li><a href="http://www.manning.com/marz/">Big Data: Principles and best practices of scalable realtime data systems"</a> by Nathan Marz and James Warren</li>
+                <li><a href="http://www.manning.com/mccreary/">Making Sense of NoSQL: A guide for managers and the rest of us</a> by Dan McCreary and Ann Kelly</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Scaling with<br>Traditional Databases</h2>
+          <p>Marz and Warren's book starts with an example that illustrates how an organization can be <q>driven to Big Data</q> by trying to scale a system with traditional databases, i.e. relational database technology</p>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (1)</h2>
+          <ul>
+            <li>Imagine you've been asked to build a system that keeps track of page views on particular URLs</li>
+            <li>You might build a relational table that looks like this</li>
+          </ul>
+          <table>
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>id</td>
+                <td>integer</td>
+              </tr>
+              <tr>
+                <td>user_id</td>
+                <td>integer</td>
+              </tr>
+              <tr>
+                <td>url</td>
+                <td>varchar(1024)</td>
+              </tr>
+              <tr>
+                <td>pageviews</td>
+                <td>bigint</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (2)</h2>
+          <ul>
+            <li>When someone loads a page on your client's website, it pings your service and you increment the count associated with that URL</li>
+            <li>Your client can then query that count when needed for reports or to display the count at the bottom of a web page.</li>
+            <li>You deploy the system and it's a big success</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (3)</h2>
+          <ul>
+            <li>Indeed, it's too big of a success. You get multiple clients tracking multiple pages and they have lots of customers</li>
+            <li>You start to get errors that indicate that clients are timing out when attempting to notify your system of a page view</li>
+            <li>The problem is that so many requests are coming in at once that the relational database cannot mutate rows fast enough (i.e. writes) to keep up with demand.</li>
+            <li>In addition, its spending so much time on writes that it can't keep up with the requests for the current count of a particular page (i.e. reads).</li>
+            <li>Something must be done!</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (4)</h2>
+          <ul>
+            <li>You decide that the problem is that it is inefficient to have one update to the database per request. You should instead batch updates to the database, asking it to update multiple rows with each request</li>
+            <li>You insert a queue between your web server and the code that will update the database</li>
+            <li>You attach a single worker to the queue; that worker reads 1000 updates off the queue and then inserts them all into the database at once.
+              <ul>
+                <li>This change drastically reduces the number of write requests</li>
+                <li>The database can handle read requests as normal without the use of a queue.</li>
+              </ul>
+            </li>
+            <li>Happy Days! Your system is working once again!</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (5)</h2>
+          <ul>
+            <li>But, you discover this solution only works temporarily</li>
+            <li>Your system gets even more popular flooding your queue with write requests. The database again starts to struggle to keep up with all of the writes that it must do and this, in turn, impacts all of the requests to your system causing many of them to time out</li>
+            <li>You briefly try to add more workers to the queue in an attempt to speed thing up with concurrency but it doesn't work</li>
+            <li>Why?</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (6)</h2>
+          <ul>
+            <li>It doesn't work because all of the workers still have to write to a single database</li>
+            <li>The database is the BOTTLENECK</li>
+            <li>What is the answer to this problem in the relational world?</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (7)</h2>
+          <ul>
+            <li>You have to <strong>SHARD</strong> the database</li>
+            <li>What does that mean?</li>
+            <li>It means that you need multiple copies of the database</li>
+            <li>You then <strong>PARTITION</strong> your data across those databases</li>
+            <li>To do that, you have to develop a partitioning strategy
+              <ul>
+                <li>often, you will take an MD5 hash of some aspect of the input data and then mod that value by the number of shards</li>
+                <li>You then write the data to the indicated shard</li>
+                <li>You do the same thing for reads to locate the data needed to fulfill a request</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (8)</h2>
+          <ul>
+            <li>Problems?
+              <ul>
+                <li>Sharding is an application-level concern: you have to manage the number of shards.</li>
+                <li>If the number of shards changes, you have to remap your entire database across all of those shards; while you're doing that, you have to turn your application off; you can't increment the data while your resharding</li>
+                <li>If you make a mistake when doing a <q>re-shard</q>, guess who has to fix it? You. That translates into MORE work and more downtime.</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (9)</h2>
+          <ul>
+            <li>You are now in a situation where you have lots of database instances to manage on potentially lots of machines.</li>
+            <li>All of the machines are needed; if one goes down, the whole system goes down!</li>
+            <li>And this brings you to the realm of fault tolerance</li>
+            <li>It's not <strong>if</strong> your machine goes down, it's <strong>WHEN</strong> it goes down</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (10)</h2>
+          <ul>
+            <li>Now you have to add complexity to your application architecture:
+              <ul>
+                <li>If a shard goes down, and you want to keep your application running, perhaps you add an in-memory queue that holds updates to that shard as <q>pending</q> which will get written to the shard once the machine comes back up</li>
+                <li>What if the machine went down, however, because the disk went bad? Are you backing this information up? How?</li>
+                <li>If you replicate your master nodes (i.e. the shards), you might allow clients to read information from the replicated server but you might not want to write to that server; because, at that point, which one is the <q>real</q> database and which one is the copy?</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Web Analytics Application (11)</h2>
+          <ul>
+            <li>The final problem: Humans!</li>
+            <li>Imagine you're working in this environment and you make a mistake and deploy a worker script that has a bug in it</li>
+            <li>It's not a crashing bug but a bug that writes the wrong data in some way
+              <ul>
+                <li>information goes to the wrong shard when written by one worker and then can't be found by another worker when it wants to read it</li>
+                <li>Or the worker accidentally increments the count in the wrong way: it's writing the <strong>WRONG</strong> information into the database</li>
+                <li>And, recall, we're <strong>mutating</strong> the database; we are not storing previous values of the columns in our rows</li>
+                <li>So the <strong>RIGHT</strong> information cannot be recovered</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Analysis of the Problems with the Traditional Approach</h2>
+          <ul>
+            <li>Marz and Warren end their example with the following analysis</li>
+            <li>Scaling your application added significant complexity to it and to its service and persistence tiers (i.e. the <q>back-end</q>)
+              <ul>
+                <li>You started with a web-server and ended with queues, workers, shards, and replicas, and all <q>glue code</q> required to make it all work</li>
+              </ul>
+            </li>
+            <li>With these changes came significant <q>operational complexity</q> as well</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Analysis of the Problems with the Traditional Approach</h2>
+          <ul>
+            <li>The challenges encountered are:
+              <ul>
+                <li><strong>Fault Tolerance is Hard</strong>: Keeping the system running in the presence of hardware failure required queues and replica servers all managed by hand</li>
+                <li><strong>Complexity is pushed to the application layer</strong>: the distributed nature of your persistence tier is not hidden from the application code in your service tier; your application knows the number of shards, it has to compute where information is stored, for queries that span shards, it has to manage the entire query process</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Analysis of the Problems with the Traditional Approach</h2>
+          <ul>
+            <li>The challenges encountered are:
+              <ul>
+                <li><strong>Lack of human fault-tolerance</strong>: there is nothing protecting you from a human making a mistake causing data to go missing or having incorrect data stored into the system overwriting correct data</li>
+                <li><strong>Maintenance is an enormous amount of work</strong>: you have to manage all of the complexity of the back-end yourself. Are the machines runnig? Properly configured? On the network? Is all the software up and running? Is it time for a re-shard?</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>NoSQL to the Rescue!</h2>
+          <ul>
+            <li>NoSQL databases are ones which are aware of their distributed nature
+              <ul>
+                <li>They manage sharding and replication FOR you!</li>
+                <li>They are <strong>horizontally scalable</strong>
+                  <ul>
+                    <li>If you need more disk space, add a server</li>
+                    <li>If you need computation to go faster, add a server</li>
+                    <li>When you add a server, the NoSQL database will re-shard for you automatically!</li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>NoSQL to the Rescue!</h2>
+          <ul>
+            <li>NoSQL databases tend to avoid mutable data
+              <ul>
+                <li>You can't lose <q>correct</q> data because...</li>
+                <li>... once it is written it is immutable and can't be updated</li>
+                <li>Instead, if a value changes, you write a new immutable copy of the updated data and...</li>
+                <li>... when you read that value, you adopt a strategy of returning the most recently written value
+                  <ul>
+                    <li>and provide an option to go back in time to previous values if you need it</li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>NoSQL to the Rescue!</h2>
+          <ul>
+            <li>Finally, NoSQL databases are fault tolerant
+              <ul>
+                <li>If a disk error takes a machine down, the NoSQL database switches to its replica automatically</li>
+                <li>It reshards the database automatically to handle new writes and ensures those writes are also replicated</li>
+                <li>When the old machine comes back, it reshards again and adjusts the replicas as needed</li>
+              </ul>
+            </li>
+            <li>All of these things happen in the persistence tier...</li>
+            <li>... your service tier / application code can be completely unaware that any of that is going on behind the scences!</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Types of NoSQL Databases</h2>
+          <ul>
+            <li>Key-Value</li>
+            <li>Graphs</li>
+            <li>Columnar</li>
+            <li>Documents</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Key-Value Stores</h2>
+          <ul>
+            <li>Does what it says on the tin
+              <ul>
+                <li>A key-value store is a simple database that when presented with a string (i.e. a key) returns an arbitrarily large set of data (i.e. the value)</li>
+                <li>Key value stores have no query language. They act just like hash tables from programming languages</li>
+                <li>Values are untyped; you can store any type of data in these databases</li>
+              </ul>
+            </li>
+            <li>Benefits: Simplicity!</li>
+            <li>Examples: Amazon SimpleDB, S3, Redis, Voldemort, Riak</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Graph Stores (1)</h2>
+          <ul>
+            <li>Databases that are optimized to store graph structures rather than table/row/column structures</li>
+            <li>Provide <strong>structural query languages</strong> so you can locate information based on the structure of your data</li>
+            <li>Example: find all pairs of Person nodes who have at least three children together, live in Colorado, and have been married for more than 15 years</li>
+            <li>Provide the ability to do graph traversals efficiently</li>
+            <li>Provide the ability to calculate shortest paths between two given nodes; locate a nodes neighbors across n hops, calculate graph-related metrics, etc.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Graph Stores (2)</h2>
+          <ul>
+            <li>Examples: Neo4J, Titan, Infinite Graph, InfoGrid</li>
+            <li>DEMO</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Columnar Stores (1)</h2>
+          <ul>
+            <li>Also known as Column Family Stores</li>
+            <li>Able to scale to enormous amounts of data</li>
+            <li>Often able to achieve very fast writes (milliseconds)...</li>
+            <li>... while also maintaining reasonable read performance
+              <ul>
+                <li>This is sometimes complicated by the fact that what you might read from one of these stores is very large</li>
+                <li>Consider: Netflix uses Cassandra to store and serve it's movies</li>
+                <li>In this case, what you are reading from the database is an entire movie that is then streamed across the Internet!</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Columnar Stores (2)</h2>
+          <ul>
+            <li>Basic Data Model
+              <ul>
+                <li>Column Family: think of this as a table of related data</li>
+                <li>Column familes consist of rows that have unique row keys</li>
+                <li>Rows consist of columns (potentially millions of them)</li>
+                <li>Columns consist of a key and a value</li>
+                <li>The value itself might be a JSON map that in turn has keys and values</li>
+              </ul>
+            </li>
+            <li>In other words: Hash tables all the way down</li>
+            <li>More accurately: a distributed hash table which is easy to partition across the nodes of a cluster</li>
+            <li>Examples: Cassandra, HBase</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Document Stores</h2>
+          <ul>
+            <li>A document store is like a key-value store but with more structure</li>
+            <li>You insert documents (a bag of key-value pairs)</li>
+            <li>Each document gets indexed in a variety of ways</li>
+            <li>Documents can then be found via queries on any attribute</li>
+            <li>Documents can be grouped into collections</li>
+            <li>Collections can be grouped into databases</li>
+            <li>Each database is then used by a particular application to get its work done</li>
+            <li>Examples: MongoDB, CouchDB, Solr/Lucene</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Why NoSQL?</h2>
+          <ul>
+            <li>What is it about these databases that gives them the moniker NoSQL?</li>
+            <li>Implicit in what we have been saying is that there is no schema</li>
+            <li>There is nothing that says: in column 5 of table 2, you will find an INT; in column 6, you'll find a VARCHAR, etc.</li>
+            <li>You are often free to store ANYTHING in one of these databases</li>
+            <li>Examples:
+              <ul>
+                <li>Document Stores: Each document in a collection can have a different set of key value pairs</li>
+                <li>Columnar Store: Each row in a columnar store can have different columns</li>
+                <li>A graph database is just a collection of nodes and edges. You can add any amount of metadata to each concept to suit your needs</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>What's Next?</h2>
+          <ul>
+            <li>Let's look at these technologies in more depth?</li>
+            <li>Given that students in this class have experience with MongoDB, I'd like to start with Document data stores</li>
+            <li>I need volunteers for next week!</li>
+          </ul>
+        </section>
+
+      </div>
+
+    </div>
+
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.js"></script>
+
+    <script>
+
+      // Full list of configuration options available at:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        controls: true,
+        progress: true,
+        history: true,
+        center: true,
+
+        transition: 'slide', // none/fade/slide/convex/concave/zoom
+
+        // Optional reveal.js plugins
+        dependencies: [
+          { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+          { src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/highlight/highlight.js', async: true, condition: function() { return !!document.querySelector( 'pre code' ); }, callback: function() { hljs.initHighlightingOnLoad(); } },
+          { src: 'plugin/zoom-js/zoom.js', async: true },
+          { src: 'plugin/notes/notes.js', async: true }
+        ]
+      });
+
+    </script>
+
+  </body>
+</html>
